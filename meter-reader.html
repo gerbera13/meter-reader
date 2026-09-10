@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Распознавание счётчиков</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center; align-items: flex-start;
+    min-height: 100vh; background: #f0f2f5; padding: 20px 0;
+  }
+  .card {
+    background: #fff; border-radius: 16px; padding: 20px 24px;
+    width: 620px; max-width: 95vw; box-shadow: 0 4px 24px rgba(0,0,0,.1);
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; color: #1a1a1a; }
+
+  .info-panel {
+    display: flex; gap: 4px; margin-bottom: 16px;
+    background: #f7f8fa; border-radius: 10px; padding: 10px;
+  }
+  .info-dot { flex: 1; text-align: center; font-size: 10px; color: #888; min-width: 0; overflow: hidden; }
+  .info-dot .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-bottom: 3px; }
+  .info-dot .dot.off { background: #ccc; }
+  .info-dot .dot.on { background: #38a169; }
+  .info-dot .dot.warn { background: #e8a838; }
+  .info-dot .label { word-break: break-word; line-height: 1.2; }
+  .info-dot .time { font-size: 10px; margin-top: 1px; }
+
+  .meter-block {
+    border: 2px solid #e0e0e0; border-radius: 12px;
+    padding: 8px 10px; margin-bottom: 2px;
+    transition: border-color .3s;
+  }
+  .meter-block.filled { border-color: #38a169; }
+  .meter-block.warning { border-color: #e05530; }
+
+  .meter-preview {
+    margin-top: 6px; white-space: nowrap; padding-left: 4px;
+  }
+  .meter-preview img {
+    display: inline-block; vertical-align: middle;
+    border-radius: 4px; border: 1px solid #e0e0e0;
+    margin: 1px 2px; width: 100px; height: 70px; object-fit: cover;
+  }
+
+  .meter-header {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px; min-width: 0;
+  }
+  .meter-num { font-size: 9px; color: #bbb; white-space: nowrap; flex-shrink: 0; }
+  .meter-label { font-size: 12px; color: #444; font-weight: 500; flex: 1; min-width: 0; word-break: break-word; line-height: 1.2; }
+
+  .tariff-row { display: flex; align-items: center; gap: 4px; margin-bottom: 3px; }
+  .tariff-row:last-child { margin-bottom: 0; }
+  .tariff-tag { font-size: 12px; font-weight: 600; color: #4a6cf7; width: 24px; text-align: right; flex-shrink: 0; }
+  .tariff-input {
+    width: 70px; padding: 4px 6px; border: 2px solid #e0e0e0;
+    border-radius: 6px; font-size: 14px; font-family: monospace;
+    letter-spacing: 1px; text-align: center; outline: none; flex-shrink: 0;
+    transition: border-color .2s;
+  }
+  .tariff-input:focus { border-color: #4a6cf7; }
+  .tariff-input.warn { border-color: #e05530; background: #fff5f0; }
+  .tariff-prev { font-size: 12px; font-family: monospace; color: #aaa; width: 65px; text-align: right; flex-shrink: 0; }
+  .tariff-diff { font-size: 12px; width: 48px; text-align: right; flex-shrink: 0; }
+  .tariff-date { font-size: 10px; color: #aaa; width: 36px; text-align: right; flex-shrink: 0; }
+  .diff-ok { color: #38a169; }
+  .diff-warn { color: #e05530; font-weight: 600; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 3px; padding: 4px 8px; border: none; border-radius: 6px;
+    font-size: 13px; cursor: pointer; transition: .2s; white-space: nowrap; flex-shrink: 0;
+  }
+  .btn-camera { background: #4a6cf7; color: #fff; }
+  .btn-camera:hover { background: #3b5de7; }
+  .btn-camera:disabled { background: #a0b4f7; cursor: not-allowed; }
+
+  .status { text-align: center; margin-top: 10px; font-size: 13px; color: #666; min-height: 18px; }
+  .status.error { color: #e53e3e; }
+  .status.success { color: #38a169; }
+
+  .spinner {
+    display: none; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;
+    border-radius: 50%; animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .panel-btn-area { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .btn-panel { background: #e8a838; color: #fff; flex-shrink: 0; }
+  .btn-panel:hover { background: #d4952a; }
+  .btn-panel:disabled { background: #d4b880; cursor: not-allowed; }
+  .panel-result {
+    font-size: 12px; color: #555; line-height: 1.5;
+    background: #fef9ee; border-radius: 8px; padding: 8px 12px;
+    margin-bottom: 14px; display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Показания электросчётчиков</h1>
+
+  <div style="text-align:right;margin-bottom:10px;display:flex;gap:6px;justify-content:flex-end;align-items:center;">
+    <input type="date" id="customDate" style="font-size:11px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;width:130px;" title="Дата для новых показаний">
+    <button class="btn" style="background:#e8f5e9;color:#38a169;font-size:11px;padding:4px 8px;" id="testBtn">Тест-данные</button>
+    <button class="btn" style="background:#eee;color:#888;font-size:12px;padding:4px 10px;" id="resetBtn">Сбросить</button>
+    <button class="btn" style="background:#fee;color:#c44;font-size:11px;padding:4px 8px;" id="clearBtn">Обнулить</button>
+  </div>
+
+  <div class="info-panel" id="infoPanel"></div>
+
+  <div class="panel-btn-area">
+    <button class="btn btn-panel" id="panelBtn">
+      <span class="spinner" id="panelSpin"></span>📷 Фото панели
+    </button>
+    <span style="font-size:11px;color:#999;">(снимок нескольких счётчиков)</span>
+  </div>
+  <div class="panel-result" id="panelResult"></div>
+
+  <div id="metersContainer"></div>
+
+  <div class="status" id="status"></div>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" style="display:none">
+<input type="file" id="panelInput" accept="image/*" style="display:none">
+
+<script>
+const API_URL = "/proxy/v1/chat/completions";
+const MODEL = "qwen3-vl-8b-instruct";
+
+const METERS = [
+  { id: "1", number: "35012876", label: "ул. Садовая, д.10",   tariffs: 1 },
+  { id: "2", number: "35044109", label: "ул. Рябиновая, д.22", tariffs: 2 },
+  { id: "3", number: "35089215", label: "ул. Парковая, д.5",   tariffs: 1 },
+  { id: "4", number: "35125703", label: "ул. Лесная, д.8",     tariffs: 3 },
+];
+
+const MAX_DIFF = 200;
+const STORAGE_KEY = "meter-reader-data-v5";
+
+let state = loadState();
+let activeMeterId = null;
+let activeTariff = null;
+
+const fileInput = document.getElementById("fileInput");
+const panelInput = document.getElementById("panelInput");
+const statusEl = document.getElementById("status");
+const panelBtn = document.getElementById("panelBtn");
+const panelResult = document.getElementById("panelResult");
+const panelSpin = document.getElementById("panelSpin");
+
+panelBtn.addEventListener("click", () => panelInput.click());
+
+document.getElementById("testBtn").addEventListener("click", () => {
+  const prevs = {
+    "1": { T1: "32400" },
+    "2": { T1: "18750", T2: "09050" },
+    "3": { T1: "45500" },
+    "4": { T1: "12180", T2: "06580", T3: "29700" },
+  };
+  state = METERS.map(m => {
+    const readings = {};
+    for (let i = 1; i <= m.tariffs; i++) {
+      const key = "T" + i;
+      readings[key] = { value: "", prev: prevs[m.id]?.[key] || "", date: "", photo: "" };
+    }
+    return { ...m, readings };
+  });
+  saveState();
+  render();
+  statusEl.textContent = "Предыдущие показания загружены ✓";
+  statusEl.className = "status success";
+});
+
+document.getElementById("clearBtn").addEventListener("click", () => {
+  if (!confirm("Обнулить ВСЕ данные, включая предыдущие показания и фото?")) return;
+  localStorage.removeItem(STORAGE_KEY);
+  state = METERS.map(makeEmpty);
+  render();
+  statusEl.textContent = "";
+  panelResult.style.display = "none";
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  if (!confirm("Сбросить текущие показания? Предыдущие сохранятся.")) return;
+  state.forEach(m => {
+    for (let i = 1; i <= m.tariffs; i++) {
+      const key = "T" + i;
+      if (m.readings[key]) {
+        if (m.readings[key].value) m.readings[key].prev = m.readings[key].value;
+        m.readings[key].value = "";
+        m.readings[key].date = "";
+        m.readings[key].photo = "";
+      }
+    }
+  });
+  saveState();
+  render();
+  statusEl.textContent = "";
+  panelResult.style.display = "none";
+});
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      return METERS.map(m => {
+        const entry = saved[m.id];
+        const readings = {};
+        for (let i = 1; i <= m.tariffs; i++) {
+          const key = "T" + i;
+          const r = entry?.tariffs?.[key];
+          readings[key] = { value: r?.value || "", prev: r?.prev || "", date: r?.date || "", photo: r?.photo || "" };
+        }
+        return { ...m, readings };
+      });
+    }
+  } catch (e) {}
+  return METERS.map(makeEmpty);
+}
+
+function makeEmpty(m) {
+  const readings = {};
+  for (let i = 1; i <= m.tariffs; i++) readings["T" + i] = { value: "", prev: "", date: "", photo: "" };
+  return { ...m, readings };
+}
+
+function formatReading(val) {
+  return val.replace(",", ".").replace(/[^\d]/g, "");
+}
+
+function isMeterFilled(m) {
+  return Object.values(m.readings).every(r => r.value !== "");
+}
+
+function getDiff(r) {
+  if (!r.value || !r.prev) return null;
+  const curr = parseInt(r.value, 10), prev = parseInt(r.prev, 10);
+  if (isNaN(curr) || isNaN(prev)) return null;
+  return curr - prev;
+}
+
+function saveState() {
+  const data = {};
+  state.forEach(m => { data[m.id] = { tariffs: m.readings }; });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function now() {
+  const dateInput = document.getElementById("customDate");
+  const d = dateInput && dateInput.value ? new Date(dateInput.value + "T12:00:00") : new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+}
+
+function render() {
+  const dateInput = document.getElementById("customDate");
+  if (dateInput && !dateInput.value) {
+    const today = new Date();
+    dateInput.value = today.toISOString().slice(0, 10);
+  }
+  renderInfoPanel();
+  renderMeters();
+}
+
+function renderInfoPanel() {
+  document.getElementById("infoPanel").innerHTML = state.map(m => {
+    const filled = isMeterFilled(m);
+    let hasWarning = false;
+    Object.values(m.readings).forEach(r => { const d = getDiff(r); if (d !== null && (d < 0 || d > MAX_DIFF)) hasWarning = true; });
+    const cls = hasWarning ? "warn" : (filled ? "on" : "off");
+    const latest = Object.values(m.readings).filter(r => r.date).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const ds = latest ? latest.date.slice(0, 10) : "";
+    return `<div class="info-dot">
+      <div class="dot ${cls}"></div>
+      <div class="label">${m.label}${m.tariffs > 1 ? ' (Т1-Т'+m.tariffs+')' : ''}</div>
+      <div class="time" style="color:${hasWarning?'#e05530':(filled?'#38a169':'#aaa')}">${filled?ds:'Ожидают'}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderMeters() {
+  const container = document.getElementById("metersContainer");
+  container.innerHTML = state.map(m => {
+    let hasAnyWarning = false;
+    let rows = "";
+    for (let i = 1; i <= m.tariffs; i++) {
+      const key = "T" + i;
+      const r = m.readings[key];
+      const diff = getDiff(r);
+      let diffText = "", diffCls = "", rowWarn = false, inputCls = "";
+      if (diff !== null) {
+        if (diff < 0) { diffText = "↓"; diffCls = "diff-warn"; rowWarn = true; }
+        else if (diff > MAX_DIFF) { diffText = "+"+diff; diffCls = "diff-warn"; rowWarn = true; }
+        else { diffText = "+"+diff; diffCls = "diff-ok"; }
+        if (rowWarn) { hasAnyWarning = true; inputCls = " warn"; }
+      }
+      rows += `<div class="tariff-row">
+        <span class="tariff-tag">${key}</span>
+        <input class="tariff-input${inputCls}" id="input-${m.id}-${key}" type="text"
+               placeholder="00000" inputmode="decimal" autocomplete="off" value="${r.value}">
+        <button class="btn btn-camera" data-meter="${m.id}" data-tariff="${key}">
+          <span class="spinner" id="spin-${m.id}-${key}"></span>📷
+        </button>
+        <span class="tariff-prev">${r.prev ? 'пред:'+r.prev : ''}</span>
+        <span class="tariff-diff ${diffCls}">${diffText}</span>
+        <span class="tariff-date">${r.date ? r.date.slice(0,5) : ''}</span>
+      </div>`;
+    }
+    const photos = [];
+    for (let i = 1; i <= m.tariffs; i++) {
+      if (m.readings["T"+i].photo) photos.push(m.readings["T"+i].photo);
+    }
+    const bc = isMeterFilled(m) ? (hasAnyWarning ? 'warning' : 'filled') : '';
+    return `<div class="meter-block${bc?' '+bc:''}">
+        <div class="meter-header"><span class="meter-label">${m.label}</span><span class="meter-num">${m.number}</span></div>
+        ${rows}
+      </div>
+      <div class="meter-preview" id="preview-${m.id}" style="display:block;min-height:6px;background:#ffe0e0;">
+        ${photos.map(p => `<img src="${p}">`).join("")}
+      </div>`;
+  }).join("");
+
+  container.querySelectorAll(".btn-camera").forEach(btn => {
+    btn.addEventListener("click", () => { activeMeterId = btn.dataset.meter; activeTariff = btn.dataset.tariff; fileInput.click(); });
+  });
+  container.querySelectorAll(".tariff-input").forEach(input => {
+    input.addEventListener("change", () => {
+      const [_, meterId, tariff] = input.id.match(/input-(.+?)-(T\d)$/);
+      const m = state.find(s => s.id === meterId);
+      if (m && m.readings[tariff]) {
+        const val = input.value.trim();
+        m.readings[tariff].value = formatReading(val);
+        m.readings[tariff].date = val ? now() : "";
+        saveState();
+        renderInfoPanel();
+        updateMeterPreview(meterId);
+      }
+    });
+  });
+}
+
+function updateMeterPreview(m) {
+  const pvDiv = document.getElementById("preview-" + m.id);
+  if (pvDiv) {
+    const photos = [];
+    for (let i = 1; i <= m.tariffs; i++) {
+      if (m.readings["T"+i].photo) photos.push(m.readings["T"+i].photo);
+    }
+    pvDiv.innerHTML = photos.map(p => `<img src="${p}">`).join("");
+    pvDiv.style.display = photos.length ? "block" : "none";
+  }
+
+  const block = document.getElementById("input-" + m.id + "-T1")?.closest(".meter-block");
+  if (block) {
+    const filled = isMeterFilled(m);
+    let hasWarning = false;
+    Object.values(m.readings).forEach(r => { const d = getDiff(r); if (d !== null && (d < 0 || d > MAX_DIFF)) hasWarning = true; });
+    block.classList.toggle("filled", filled && !hasWarning);
+    block.classList.toggle("warning", hasWarning);
+  }
+}
+
+function setLoading(loading) {
+  const btn = document.querySelector(`[data-meter="${activeMeterId}"][data-tariff="${activeTariff}"]`);
+  const spin = document.getElementById("spin-" + activeMeterId + "-" + activeTariff);
+  if (btn) btn.disabled = loading;
+  if (spin) spin.style.display = loading ? "inline-block" : "none";
+}
+
+fileInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file || !activeMeterId || !activeTariff) return;
+  const dataUrl = await readAsDataURL(file);
+
+  const previewDiv = document.getElementById("preview-" + activeMeterId);
+  if (previewDiv) {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const maxW = 100;
+      const ratio = maxW / img.width;
+      canvas.width = maxW; canvas.height = Math.round(img.height * ratio);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      const src = canvas.toDataURL("image/jpeg", 0.5);
+      const m = state.find(s => s.id === activeMeterId);
+      if (m) {
+        m.readings[activeTariff].photo = src;
+        saveState();
+        updateMeterPreview(m);
+      }
+    };
+    img.src = dataUrl;
+  }
+
+  setLoading(true);
+  statusEl.textContent = "⏳ Загружаю..."; statusEl.className = "status";
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL, max_tokens: 20, temperature: 0,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }, { type: "text", text: "На фото — табло электросчётчика. Верни только целое число — цифры, которые видишь на табло. Только число, без пояснений." }] }],
+      }),
+    });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error?.message || err.message || `HTTP ${res.status}`); }
+    const json = await res.json();
+    const digits = json.choices?.[0]?.message?.content?.trim() || "";
+
+    const m = state.find(s => s.id === activeMeterId);
+    let warn = "";
+    if (m && m.readings[activeTariff]) {
+      const formatted = formatReading(digits);
+      if (m.readings[activeTariff].value && formatted === m.readings[activeTariff].value) {
+        warn = " ✓ Уже внесено ранее";
+      } else if (formatted) {
+        m.readings[activeTariff].value = formatted;
+        m.readings[activeTariff].date = digits ? now() : "";
+        saveState();
+        const diff = getDiff(m.readings[activeTariff]);
+        if (diff !== null) {
+          if (diff < 0) warn = " ⚠ Меньше предыдущего!";
+          else if (diff > MAX_DIFF) warn = ` ⚠ Расход +${diff} — подозрительно`;
+        }
+      }
+    }
+    renderInfoPanel();
+    updateMeterPreview(activeMeterId);
+    const inputEl = document.getElementById("input-" + activeMeterId + "-" + activeTariff);
+    const formatted = formatReading(digits);
+    if (inputEl && formatted) inputEl.value = formatted || "—";
+    statusEl.textContent = (digits ? "Готово ✓" : "Цифры не найдены") + warn;
+    statusEl.className = digits ? "status success" : "status error";
+  } catch (err) {
+    statusEl.textContent = "Ошибка: " + err.message;
+    statusEl.className = "status error";
+  } finally { setLoading(false); fileInput.value = ""; }
+});
+
+panelInput.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const dataUrl = await readAsDataURL(file);
+
+  panelBtn.disabled = true; panelSpin.style.display = "inline-block";
+  panelResult.style.display = "none";
+  statusEl.textContent = "⏳ Загружаю данные..."; statusEl.className = "status";
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL, max_tokens: 200, temperature: 0,
+        messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }, { type: "text", text: "На фото — панель с электросчётчиками. Перечисли ВСЕ показания: для каждого укажи тариф и целое число. Формат: 'T1: 32548'. Каждое с новой строки. Только это, без пояснений." }] }],
+      }),
+    });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error?.message || err.message || `HTTP ${res.status}`); }
+    const json = await res.json();
+    const text = json.choices?.[0]?.message?.content?.trim() || "";
+    const lines = text.split("\n").map(l => l.trim()).filter(l => /\d/.test(l));
+
+    const slots = [];
+    for (let t = 1; t <= 3; t++) state.forEach(m => { if (m.tariffs >= t) slots.push({ meterId: m.id, tariff: "T"+t }); });
+
+    const updatedMeters = new Set();
+
+    let filled = 0, warnings = [], skipped = 0;
+    for (const line of lines) {
+      let v = line.replace(/^T\d\s*[:：]\s*/i, "").trim().replace(",", ".").replace(/[^\d]/g, "");
+      if (!v) continue;
+      const formatted = formatReading(v);
+
+      const dupSlot = slots.find(s => {
+        const m = state.find(m2 => m2.id === s.meterId);
+        return m?.readings[s.tariff]?.value && m.readings[s.tariff].value === formatted;
+      });
+      if (dupSlot) { skipped++; slots.splice(slots.indexOf(dupSlot), 1); continue; }
+
+      const slot = slots.find(s => !state.find(m => m.id === s.meterId)?.readings[s.tariff]?.value);
+      if (!slot) break;
+      const m = state.find(s => s.id === slot.meterId);
+      if (m?.readings[slot.tariff]) {
+        m.readings[slot.tariff].value = formatted;
+        m.readings[slot.tariff].date = now();
+        updatedMeters.add(slot.meterId);
+        saveState();
+        const inputEl = document.getElementById("input-" + slot.meterId + "-" + slot.tariff);
+        if (inputEl) inputEl.value = formatted;
+        filled++; slots.splice(slots.indexOf(slot), 1);
+        const d = getDiff(m.readings[slot.tariff]);
+        if (d !== null && (d < 0 || d > MAX_DIFF)) warnings.push(`${m.label} ${slot.tariff}: ${d>=0?'+':''}${d}`);
+      }
+    }
+
+    renderInfoPanel();
+    state.forEach(m => updateMeterPreview(m));
+
+    // Store photo for updated tariffs
+    const img = new Image();
+    img.onload = () => {
+      const src = dataUrl;
+      const updatedList = state.filter(m => updatedMeters.has(m.id));
+      updatedList.forEach(m => {
+        for (let t = 1; t <= m.tariffs; t++) {
+          const key = "T" + t;
+          if (m.readings[key].value && !m.readings[key].photo) {
+            const canvas = document.createElement("canvas");
+            const maxW = 100;
+            const ratio = maxW / img.width;
+            canvas.width = maxW; canvas.height = Math.round(img.height * ratio);
+            canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+            m.readings[key].photo = canvas.toDataURL("image/jpeg", 0.5);
+            break;
+          }
+        }
+        saveState();
+      });
+      state.forEach(m => updateMeterPreview(m));
+    };
+    img.src = dataUrl;
+
+    const wt = warnings.length ? `<br><span style="color:#e05530;">⚠ ${warnings.join(', ')}</span>` : "";
+    const st = skipped ? `<br><span style="color:#aaa;">✓ Уже внесено: ${skipped}</span>` : "";
+    panelResult.innerHTML = `<strong>Заполнено: ${filled}/${slots.length+filled+skipped} полей</strong>${wt}${st}`;
+    panelResult.style.display = "block";
+    const total = filled + skipped;
+    statusEl.textContent = total ? (filled ? `Автозаполнено ${filled} полей ✓` : `✓ Уже внесено: ${skipped}`) : "Ничего не распознано";
+    statusEl.className = total ? "status success" : "status error";
+  } catch (err) {
+    statusEl.textContent = "Ошибка: " + err.message;
+    statusEl.className = "status error";
+  } finally { panelBtn.disabled = false; panelSpin.style.display = "none"; panelInput.value = ""; }
+});
+
+function readAsDataURL(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 800; let w = img.width, h = img.height;
+      if (w > max || h > max) { const r = Math.min(max/w, max/h); w = Math.round(w*r); h = Math.round(h*r); }
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL("image/jpeg", 0.7));
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+render();
+</script>
+
+</body>
+</html>
